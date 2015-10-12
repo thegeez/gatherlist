@@ -29,7 +29,7 @@
                                   [org.clojure/tools.namespace "0.2.3"]
                                   [org.clojure/java.classpath "0.2.0"]
                                   [org.apache.derby/derby "10.8.1.2"]
-                                  [kerodon "0.6.0-SNAPSHOT"]
+                                  ;;[kerodon "0.6.0-SNAPSHOT"]
                                   [peridot "0.3.1" :exclusions [clj-time]]]}
              :uberjar {:main net.thegeez.gatherlist.main
                        :aot [net.thegeez.gatherlist.main]
