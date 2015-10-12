@@ -58,7 +58,7 @@
           ;;         :token_type "bearer"}
           (:body response)))
       (catch Exception ex
-        (log/warn :msg "Could not fetch OAuth access token from Facebook"
+        (log/info :msg "Could not fetch OAuth access token from Facebook"
                   :exception ex)
         nil))))
 
@@ -70,7 +70,7 @@
                                                        :as :json})]
       (:body response))
     (catch Exception ex
-      (log/warn :msg "Could not fetch user details from Facebook"
+      (log/info :msg "Could not fetch user details from Facebook"
                 :exception ex)
       nil)))
 
@@ -115,28 +115,32 @@
                    {:keys [return-to orig-state]} (get-in context [:request :session :oauth-callback])]
                (if (and state code return-to orig-state
                         (= state orig-state))
-                 (if-let [user-info (when-let [token (fetch-token code)]
-                                      (resolve-user-info token))]
-                   ;; user-info {:access-token "<code>"
-                   ;;            :identity {:name "First Last"
-                   ;;                       :id "<some id>"}}
-                   (let [facebook-id (get-in user-info [:identity :id])
-                         facebook-name (get-in user-info [:identity :name])
-                         access-token (get-in user-info [:access-token])
-                         {:keys [id name] :as user} (users/find-or-create-by-facebook-id context facebook-id)]
-                     (if name
-                       (combine context
-                            {:response
-                             {:status 303
-                              :headers {"Location" return-to}
-                              :session {:auth {:id id}}
-                              :flash {:message "Logged in through Facebook"}
-                              }})
-                       (combine context
-                                {:response
-                                 {:status 303
-                                  :headers {"Location" (link/link context :oauth-create-name :params {:return-to return-to
-                                                                                                      :suggested-name facebook-name})}
-                                  :session {:auth-create-name {:id id}}}})))
-                   (not-allowed context))
-                 (not-allowed context))))}))
+                 (do
+                   (log/info :check :ok)
+                   (if-let [user-info (when-let [token (fetch-token code)]
+                                        (resolve-user-info token))]
+                    ;; user-info {:access-token "<code>"
+                    ;;            :identity {:name "First Last"
+                    ;;                       :id "<some id>"}}
+                    (let [facebook-id (get-in user-info [:identity :id])
+                          facebook-name (get-in user-info [:identity :name])
+                          access-token (get-in user-info [:access-token])
+                          {:keys [id name] :as user} (users/find-or-create-by-facebook-id context facebook-id)]
+                      (if name
+                        (combine context
+                                 {:response
+                                  {:status 303
+                                   :headers {"Location" return-to}
+                                   :session {:auth {:id id}}
+                                   :flash {:message "Logged in through Facebook"}
+                                   }})
+                        (combine context
+                                 {:response
+                                  {:status 303
+                                   :headers {"Location" (link/link context :oauth-create-name :params {:return-to return-to
+                                                                                                       :suggested-name facebook-name})}
+                                   :session {:auth-create-name {:id id}}}})))
+                    (do (log/info :facebook-user-info :failed)
+                        (not-allowed context))))
+                 (do (log/info :facebook-failed [state code return-to orig-state])
+                     (not-allowed context)))))}))
