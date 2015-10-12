@@ -28,20 +28,27 @@
      :client-secret client-secret
      :redirect-uri redirect-uri}))
 
-(def consumer
-  (let [{:keys [client-id client-secret]} (get-client-settings)]
-    (oauth/make-consumer client-id
-                         client-secret
-                         twitter-request-token-url
-                         twitter-access-token-url
-                         twitter-authorize-url
-                         :hmac-sha1)))
+(def consumer* (promise))
+
+(defn get-consumer []
+  (if (realized? consumer*)
+    @consumer*
+    (do (deliver consumer*
+                 (let [{:keys [client-id client-secret]} (get-client-settings)]
+                   (oauth/make-consumer client-id
+                                        client-secret
+                                        twitter-request-token-url
+                                        twitter-access-token-url
+                                        twitter-authorize-url
+                                        :hmac-sha1)))
+        @consumer*)))
 
 (def authenticate
   (interceptor/interceptor
    {:leave (fn [context]
              (let [{:keys [redirect-uri]} (get-client-settings)
                    ;; request-token makes an http request to twitter
+                   consumer (get-consumer)
                    request-token (oauth/request-token consumer redirect-uri)
                    url (oauth/user-approval-uri consumer (:oauth_token request-token))]
                (combine context
@@ -63,7 +70,8 @@
    {:leave (fn [context]
              (let [{oauth-token :oauth_token
                     oauth-verifier :oauth_verifier} (get-in context [:request :query-params])
-                    {:keys [return-to request-token]} (get-in context [:request :session :oauth-callback])]
+                    {:keys [return-to request-token]} (get-in context [:request :session :oauth-callback])
+                    consumer (get-consumer)]
                        (if (and oauth-token oauth-verifier return-to request-token)
                          ;; access-token makes an http request to twitter
                          (if-let [user-info (oauth/access-token consumer request-token oauth-verifier)]
