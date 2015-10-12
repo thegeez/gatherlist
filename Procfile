@@ -1,1 +1,1 @@
-web: java $JVM_OPTS -cp target/gatherlist-prod-standalone.jar gatherlist.main $PORT $DATABASE_URL
+web: java $JVM_OPTS -cp target/gatherlist-prod-standalone.jar net.thegeez.gatherlist.main $PORT $DATABASE_URL
