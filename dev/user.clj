@@ -13,6 +13,11 @@
 
 (def modified-namespaces (ns-tracker "src"))
 
+(defn wrap-cljs-interceptor [service]
+  (update-in service [::http/interceptors]
+             (fn [ics]
+               (into [service/wrap-dev-cljs] ics))))
+
 (defn dev-service [service]
     (-> service ;; start with production configuration
       (merge {:env :dev
@@ -28,7 +33,8 @@
               ::http/allowed-origins {:creds true :allowed-origins (constantly true)}})
       ;; Wire up interceptor chains
       http/default-interceptors
-      http/dev-interceptors))
+      http/dev-interceptors
+      wrap-cljs-interceptor))
 
 (defn dev-system [config-options]
   (log/info :msg "Hello world, this is the development system!")
