@@ -581,9 +581,9 @@
                                                     [:#login-box] (login-box-html context)
                                                     [:#content] (flash-html context)
 
-                                                    [:#content] (html/html-content
+                                                    #_#_[:#content] (html/html-content
                                                                  (edn-wrap/html-edn context))
-                                                    [:#content] (html/append
+                                                    #_#_[:#content] (html/append
                                                                  (map html/html (edn-wrap/forms-edn context)))
                                                     [:#content] (html/append
                                                                  (views.pages/page (get-in context [:response :data :page])))
