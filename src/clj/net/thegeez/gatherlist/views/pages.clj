@@ -62,4 +62,6 @@
    [:div
     [:h1 (:title page)]
     [:div
-     (map to-html (:stream (:stream page)))]]))
+     (map to-html (:stream (:stream page)))]
+    [:div#updates
+     {:class "alert alert-info hidden"}]]))

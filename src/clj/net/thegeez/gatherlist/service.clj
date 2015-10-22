@@ -1,9 +1,12 @@
 (ns net.thegeez.gatherlist.service
   (:require [buddy.hashers :as hashers]
+            [clojure.core.async :as async]
             [clojure.java.jdbc :as jdbc]
+            [clojure.string :as string]
             [io.pedestal.log :as log]
             [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
+            [io.pedestal.http.sse :as sse]
             [io.pedestal.http.body-params :as body-params]
             [io.pedestal.http.ring-middlewares :as middlewares]
             [io.pedestal.http.route.definition :refer [defroutes]]
@@ -25,6 +28,17 @@
             [net.thegeez.gatherlist.views.pages :as views.pages]))
 
 (def application-frame (html/html-resource "templates/application.html"))
+
+(def wrap-dev-cljs
+  (interceptor/interceptor
+   {:leave (fn [context]
+             (cond-> context
+                     (= (get-in context [:response :headers "Content-Type"]) "text/html")
+                     (update-in [:response :body]
+                                (fn [body]
+                                  (let [match "<script type=\"text/javascript\" src=\"/js/gatherlist.js\"></script>"
+                                        replace "<script type=\"text/javascript\" src=\"/js/gatherlist_dev.js\"></script>"]
+                                    (string/replace body match replace))))))}))
 
 (defn return-to-or-link [context link-name & opts]
   (let [return-to (get-in context [:request :query-params :return-to])]
@@ -543,10 +557,14 @@
                                   :data {:flash (get-in context [:request :flash])
                                          :self (get-in context [:self])
                                          :page (get-in context [:page])
-                                         :links (cond-> {:self (link/link context ::page :params {:page-slug (get-in context [:page :page-slug])})}
+                                         :links (cond-> {:self (get-in context [:self])
+                                                         :page-stream (link/link context ::page-events :params {:start_from (:id (last (get-in context [:page :items])))})}
                                                         (get-in context [:auth])
                                                         (merge {:edit-title (link/link context ::edit-title :params {:page-slug (get-in context [:page :page-slug])})
-                                                                :add-item (link/link context ::add-item :params {:page-slug (get-in context [:page :page-slug])})}))}}}))}))
+                                                                :add-item (link/link context ::add-item :params {:page-slug (get-in context [:page :page-slug])})})
+                                                        (not (get-in context [:auth]))
+                                                        (merge {:login (link/link context ::login :query-params {:return-to (link/self context)})
+                                                                :signup (link/link context ::signup :query-params {:return-to (link/self context)})}))}}}))}))
 
 (def with-page-html
   (interceptor/interceptor
@@ -563,6 +581,8 @@
                                                     [:#login-box] (login-box-html context)
                                                     [:#content] (flash-html context)
 
+                                                    [:#content] (html/html-content
+                                                                 (edn-wrap/html-edn context))
                                                     [:#content] (html/append
                                                                  (map html/html (edn-wrap/forms-edn context)))
                                                     [:#content] (html/append
@@ -579,16 +599,55 @@
                                                             " or "
                                                             [:a {:href add-item}
                                                              " add text to this page"]]])))
-                                                      (html/append
-                                                       (html/html
-                                                        [:div.panel.panel-default
-                                                         [:div.panel-body
-                                                          [:a {:href (link/link context ::login :query-params {:return-to (link/self context)})}
-                                                           "Login"]
-                                                          " or "
-                                                          [:a {:href (link/link context ::signup :query-params {:return-to (link/self context)})}
-                                                           "Signup"]
-                                                          " to add to this page"]])))))))))))}))
+                                                      (let [{:keys [login signup]} (get-in context [:response :data :links])]
+                                                        (html/append
+                                                         (html/html
+                                                          [:div.panel.panel-default
+                                                           [:div.panel-body
+                                                            [:a {:href login}
+                                                             "Login"]
+                                                            " or "
+                                                            [:a {:href signup}
+                                                             "Signup"]
+                                                            " to add to this page"]]))))
+
+                                                    [:#content]
+                                                    (html/append
+                                                     (html/html [:script {:type "text/javascript" :src "/js/eventsource.js"}]
+                                                                [:script {:type "text/javascript" :src "/js/gatherlist.js"}]
+                                                                [:script {:type "text/javascript"}
+                                                                 (str "net.thegeez.gatherlist.client.startstream(\"" (get-in context [:response :data :links :page-stream]) "\")")]))))))))))}))
+
+;; dirty hack as Pedestal SSE doesn't do :id field on SSE, so we use
+;; name instead
+(alter-var-root #'io.pedestal.http.sse/EVENT_FIELD (fn [_]
+                                                     (.getBytes "id: " "UTF-8")))
+
+(defn page-stream-ready [event-chan context]
+  (let [start-from (or (try (inc (Long/parseLong (get-in context [:request :headers "last-event-id"])))
+                            (catch Exception e nil))
+                       (try (inc (Long/parseLong (get-in context [:request :query-params :evs_last_event_id])))
+                            (catch Exception e nil))
+                       (try (inc (Long/parseLong (get-in context [:request :query-params :start_from])))
+                            (catch Exception e nil))
+                       0)
+        page-slug (get-in context [:request :path-params :page-slug])]
+    (loop [i 0
+           start-from start-from]
+      (let [items-since (pages/get-items-since context page-slug start-from)
+            start-from (or (when-let [id (:id (last (:items items-since)))]
+                             (inc id))
+                           start-from)]
+        (when items-since
+          (loop [[item & items] (:items items-since)]
+            (when item
+              (when (async/>!! event-chan {:name (:id item)
+                                           :data (pr-str item)})
+                (recur items)))))
+        (Thread/sleep 1000)
+        (when (< i 20)
+          (recur (inc i) start-from)))))
+  (async/close! event-chan))
 
 (def create-binding
   {:page
@@ -640,6 +699,7 @@
                       (binding/with-binding create-binding)]
       {:get [::create create]
        :post [::create-post create-post]}]
+     ["/gle/:page-slug" {:get [::page-events (sse/start-event-stream page-stream-ready)]}]
      ["/gl/:page-slug"
       ^:interceptors [with-page]
       {:get
