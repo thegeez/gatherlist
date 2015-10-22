@@ -1,4 +1,8 @@
-// from https://github.com/amvtek/EventSource under MIT license
+/*
+   * EventSource polyfill version 0.9.7
+   * Supported by sc AmvTek srl
+   * :email: devel@amvtek.com
+ */
 ;(function (global) {
 
     if (global.EventSource && !global._eventSourceImportPrefix){
@@ -140,7 +144,6 @@
             }
 
             if (this._noActivityTimer){
-//                this.log('removing no-activity timer')
                 clearInterval(this._noActivityTimer);
                 this._noActivityTimer = null;
             }
@@ -173,13 +176,12 @@
             this.cleanup();
         },
 
-        ondata: function() {
+        _onxhrdata: function() {
 
             var request = this._xhr;
 
             if (request.isReady() && !request.hasError() ) {
                 // reset the timer, as we have activity
-//                this.log.msg('reseting the no-activity timer inside ondata')
                 this.resetNoActivityTimer();
 
                 // move this EventSource to OPEN state...
@@ -411,7 +413,7 @@
             request.onreadystatechange = function(){
                 if (request.readyState > 1 && evs.readyState != evs.CLOSED) {
                     if (request.status == 200 || (request.status>=300 && request.status<400)){
-                        evs.ondata();
+                        evs._onxhrdata();
                     }
                     else {
                         request._failed = true;
@@ -430,7 +432,7 @@
 
             request.open('GET', evs.urlWithParams(evs.URL, evs.getArgs), true);
 
-            var headers = evs.requestHeaders; // maybe null
+            var headers = evs.xhrHeaders; // maybe null
             for (var header in headers) {
                 if (headers.hasOwnProperty(header)){
                     request.setRequestHeader(header, headers[header]);
@@ -503,12 +505,12 @@
             // set handlers
             request.onprogress = function(){
                 request._ready = true;
-                evs.ondata();
+                evs._onxhrdata();
             };
 
             request.onload = function(){
                 this._loaded = true;
-                evs.ondata();
+                evs._onxhrdata();
             };
 
             request.onerror = function(){
@@ -616,5 +618,4 @@
     }
 
     global[evsImportName] = EventSource;
-
 })(this);
