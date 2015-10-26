@@ -6,7 +6,6 @@
             [io.pedestal.log :as log]
             [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
-            [io.pedestal.http.sse :as sse]
             [io.pedestal.http.body-params :as body-params]
             [io.pedestal.http.ring-middlewares :as middlewares]
             [io.pedestal.http.route.definition :refer [defroutes]]
@@ -18,148 +17,15 @@
             [net.thegeez.w3a.form :as form]
             [net.thegeez.w3a.interceptor :refer [combine] :as w3ainterceptor]
             [net.thegeez.w3a.link :as link]
-            [net.thegeez.w3a.pagination :as pagination]
+            [net.thegeez.w3a.oauth.github :as oauth.github]
+            [net.thegeez.w3a.oauth.google :as oauth.google]
+            [net.thegeez.w3a.oauth.facebook :as oauth.facebook]
+            [net.thegeez.w3a.oauth.twitter :as oauth.twitter]
+            [net.thegeez.w3a.sse :as w3a-sse]
             [net.thegeez.gatherlist.data.users :as users]
             [net.thegeez.gatherlist.data.pages :as pages]
-            [net.thegeez.gatherlist.oauth.github :as oauth.github]
-            [net.thegeez.gatherlist.oauth.google :as oauth.google]
-            [net.thegeez.gatherlist.oauth.facebook :as oauth.facebook]
-            [net.thegeez.gatherlist.oauth.twitter :as oauth.twitter]
-            [net.thegeez.gatherlist.views.pages :as views.pages]))
-
-(def application-frame (html/html-resource "templates/application.html"))
-
-(def wrap-dev-cljs
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (= (get-in context [:response :headers "Content-Type"]) "text/html")
-                     (update-in [:response :body]
-                                (fn [body]
-                                  (let [match "<script type=\"text/javascript\" src=\"/js/gatherlist.js\"></script>"
-                                        replace "<script type=\"text/javascript\" src=\"/js/gatherlist_dev.js\"></script>"]
-                                    (string/replace body match replace))))))}))
-
-(defn return-to-or-link [context link-name & opts]
-  (let [return-to (get-in context [:request :query-params :return-to])]
-    (if (and return-to
-             (seq return-to))
-      return-to
-      (apply link/link context link-name opts))))
-
-(defn login-box-html [context]
-  (if-let [auth (get-in context [:response :data :auth])]
-    (html/transform-content
-     [:a#name] (html/content (:name auth))
-     [:a#user] (html/set-attr :href (:url auth))
-     [:form#logout] (html/do->
-                     (html/prepend
-                      (html/html [:input {:type "hidden"
-                                          :name "__anti-forgery-token"
-                                          :value (get-in context [:request :io.pedestal.http.csrf/anti-forgery-token])}]))
-                     (html/set-attr :action (str (:logout auth)
-                                                 "?return-to=" (get context :self)))))
-    (html/transform-content
-     [:li] (html/clone-for [content [[:a {:href (link/link context ::login :query-params {:return-to (link/self context)})}
-                                      "Login"]
-                                     [:a {:href (link/link context ::signup :query-params {:return-to (link/self context)})}
-                                      "Signup"]]]
-                           (html/content (html/html content))))))
-
-(defn flash-html [context]
-  (if-let [msg (get-in context [:response :data :flash :message])]
-    (html/before
-     (html/html [:div {:id "flash"
-                       :class "alert alert-info"} msg]))
-    identity))
-
-(def with-html
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (edn-wrap/for-html? context)
-                     (->
-                      (assoc-in [:response :headers "Content-Type"] "text/html")
-                      (update-in [:response :body]
-                                 (fn [body]
-                                   (apply str (html/emit*
-                                               (html/at application-frame
-                                                        [:#login-box]
-                                                        (login-box-html context)
-
-                                                        [:#content]
-                                                        (flash-html context)
-
-                                                        [:#content] (html/append
-                                                                     (map html/html (edn-wrap/forms-edn context)))))))))))}))
-
-(def with-login-html
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (edn-wrap/for-html? context)
-                     (->
-                      (assoc-in [:response :headers "Content-Type"] "text/html")
-                      (update-in [:response :body]
-                                 (fn [body]
-                                   (apply str (html/emit*
-                                               (html/at application-frame
-                                                        [:.navbar] nil
-                                                        [:#content]
-                                                        (flash-html context)
-
-                                                        [:#content] (html/before
-                                                                     (html/html [:h1 "Gatherlist login"]))
-                                                        [:#content] (html/append (html/html
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Login with "
-                                                                                    [:a {:href (get-in context [:response :data :links :github])} "GitHub"]]]
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Login with "
-                                                                                    [:a {:href (get-in context [:response :data :links :google])} "Google"]]]
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Login with "
-                                                                                    [:a {:href (get-in context [:response :data :links :facebook])} "Facebook"]]]
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Login with "
-                                                                                    [:a {:href (get-in context [:response :data :links :twitter])} "Twitter"]]]
-                                                                                  [:div "Login with amy/amy or bob/bob"]))
-                                                        [:#content] (html/append
-                                                                     (map html/html (edn-wrap/forms-edn context)))))))))))}))
-
-(def with-signup-html
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (edn-wrap/for-html? context)
-                     (->
-                      (assoc-in [:response :headers "Content-Type"] "text/html")
-                      (update-in [:response :body]
-                                 (fn [body]
-                                   (apply str (html/emit*
-                                               (html/at application-frame
-                                                        [:.navbar] nil
-                                                        [:#content]
-                                                        (flash-html context)
-
-                                                        [:#content] (html/before
-                                                                     (html/html [:h1 "Gatherlist signup"]))
-                                                        [:#content] (html/append (html/html
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Signup with "
-                                                                                    [:a {:href (get-in context [:response :data :links :github])} "GitHub"]]]
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Signup with "
-                                                                                    [:a {:href (get-in context [:response :data :links :google])} "Google"]]]
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Signup with "
-                                                                                    [:a {:href (get-in context [:response :data :links :facebook])} "Facebook"]]]
-                                                                                  [:div.panel.panel-default
-                                                                                   [:div.panel-body "Signup with "
-                                                                                    [:a {:href (get-in context [:response :data :links :twitter])} "Twitter"]]]))
-                                                        [:#content] (html/append
-                                                                     (map html/html (edn-wrap/forms-edn context)))))))))))}))
-
+            [net.thegeez.gatherlist.views.pages :as views.pages]
+            [net.thegeez.gatherlist.views.application :as views.application]))
 
 (def name-binding
   {:user
@@ -171,35 +37,13 @@
                     {:name ["Name can't be empty"]}
 ))}]})
 
-(def with-name-html
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (edn-wrap/for-html? context)
-                     (->
-                      (assoc-in [:response :headers "Content-Type"] "text/html")
-                      (update-in [:response :body]
-                                 (fn [body]
-                                   (apply str (html/emit*
-                                               (html/at application-frame
-                                                        [:.navbar] nil
-                                                        [:#content]
-                                                        (flash-html context)
-
-                                                        [:#content] (html/before
-                                                                     (html/html [:h1 "Gatherlist account creation"]))
-                                                        [:#content] (html/append (html/html [:div "Attach a name to your account"]))
-                                                        [:#content] (html/append
-                                                                     (map html/html (edn-wrap/forms-edn context)))))))))))}))
-
 (def create-name
   (interceptor/interceptor
    {:leave (fn [context]
              (combine context
                       {:response
                        {:status 200
-                        :data {:flash (get-in context [:request :flash])
-                               :user {:net.thegeez.w3a.binding/binding name-binding
+                        :data {:user {:net.thegeez.w3a.binding/binding name-binding
                                       :name (get-in context [:request :query-params :suggested-name])}}}}))}))
 
 (def create-name-post
@@ -224,48 +68,16 @@
                                                      (link/link context ::home))}
                             :flash {:message "Name created"}}}))))}))
 
-(def with-home-html
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (edn-wrap/for-html? context)
-                     (->
-                      (assoc-in [:response :headers "Content-Type"] "text/html")
-                      (update-in [:response :body]
-                                 (fn [body]
-                                   (apply str
-                                          (html/emit*
-                                           (html/at application-frame
-                                                    [:#login-box] (login-box-html context)
-                                                    [:#content] (flash-html context)
-
-                                                    [:#content]
-                                                    (let [{:keys [create demo-page]}
-                                                          (get-in context [:response :data :links])]
-                                                      (html/append
-                                                       (html/html
-                                                        [:div.panel.panel-default
-                                                         [:div.panel-heading
-                                                          [:h3.panel-title "Gatherlist"]]
-                                                         [:div.panel-body
-                                                          [:p "A Clojure app on Heroku with Pedestal, database and OAuth login."]
-                                                          [:a {:href create}
-                                                           "Create a page"]
-                                                          " or "
-                                                          [:a {:href demo-page}
-                                                           "use the demo page"]]])))))))))))}))
-
 (def home
   (interceptor/interceptor
    {:leave (fn [context]
              (combine context
                       {:response
                        {:status 200
-                        :data {:links {:signup (link/link context ::signup)
-                                       :login (link/link context ::login)
+                        :data {:links {:signup (link/link context :signup)
+                                       :login (link/link context :login)
                                        :create (link/link context ::create)
-                                       :demo-page (link/link context ::page :params {:page-slug "demo"})}
-                               :flash (get-in context [:request :flash])}}}))}))
+                                       :demo-page (link/link context ::page :params {:page-slug "demo"})}}}}))}))
 
 (defn user-resource [context data]
   (dissoc data :id))
@@ -286,7 +98,7 @@
                (impl-interceptor/terminate
                 (combine context
                          {:response {:status 303
-                                     :headers {"Location" (return-to-or-link context ::home)}
+                                     :headers {"Location" (link/return-to-or-link context ::home)}
                                      :flash {:message "Already logged in"}}}))
                context))}))
 
@@ -320,15 +132,14 @@
              (combine context
                       {:response
                        {:status 200
-                        :data {:flash (get-in context [:request :flash])
-                               :links {:github (link/link context ::oauth-github
-                                                          :params {:return-to (return-to-or-link context ::home)})
+                        :data {:links {:github (link/link context ::oauth-github
+                                                          :params {:return-to (link/return-to-or-link context ::home)})
                                        :google (link/link context ::oauth-google
-                                                          :params {:return-to (return-to-or-link context ::home)})
+                                                          :params {:return-to (link/return-to-or-link context ::home)})
                                        :facebook (link/link context ::oauth-facebook
-                                                            :params {:return-to (return-to-or-link context ::home)})
+                                                            :params {:return-to (link/return-to-or-link context ::home)})
                                        :twitter (link/link context ::oauth-twitter
-                                                           :params {:return-to (return-to-or-link context ::home)})}}}}))}))
+                                                           :params {:return-to (link/return-to-or-link context ::home)})}}}}))}))
 
 (def signup-post
   (interceptor/interceptor
@@ -361,7 +172,7 @@
                    (combine context
                             {:response
                              {:status 201
-                              :headers {"Location" (return-to-or-link context ::home)}
+                              :headers {"Location" (link/return-to-or-link context ::home)}
                               :session {:auth {:id (:id auth)}}
                               :flash {:message "User created"}}})))))}))
 
@@ -387,15 +198,14 @@
              (combine context
                       {:response
                        {:status 200
-                        :data {:flash (get-in context [:request :flash])
-                               :links {:github (link/link context ::oauth-github
-                                                          :params {:return-to (return-to-or-link context ::home)})
+                        :data {:links {:github (link/link context ::oauth-github
+                                                          :params {:return-to (link/return-to-or-link context ::home)})
                                        :google (link/link context ::oauth-google
-                                                          :params {:return-to (return-to-or-link context ::home)})
+                                                          :params {:return-to (link/return-to-or-link context ::home)})
                                        :facebook (link/link context ::oauth-facebook
-                                                            :params {:return-to (return-to-or-link context ::home)})
+                                                            :params {:return-to (link/return-to-or-link context ::home)})
                                        :twitter (link/link context ::oauth-twitter
-                                                           :params {:return-to (return-to-or-link context ::home)})}}}}))}))
+                                                           :params {:return-to (link/return-to-or-link context ::home)})}}}}))}))
 
 (def login-post
   (interceptor/interceptor
@@ -406,7 +216,7 @@
                           {:response
                            {:status 303
                             :headers {"Location"
-                                      (return-to-or-link context ::home)}
+                                      (link/return-to-or-link context ::home)}
                             :session {:auth {:id (:id auth)}}
                             :flash {:message "Login successful"}}})
                  (combine context
@@ -440,7 +250,7 @@
 (defn auth-resource [context]
   (let [{:keys [id] :as auth} (:auth context)]
     (assoc auth
-      :logout (link/link context ::logout-post))))
+      :logout (link/link context :logout))))
 
 (def with-login-data
   (interceptor/interceptor
@@ -469,8 +279,7 @@
              (combine context
                       {:response
                        {:status 200
-                        :data {:flash (get-in context [:request :flash])
-                               :user (user-resource context (get-in context [:user]))}}}))}))
+                        :data {:user (user-resource context (get-in context [:user]))}}}))}))
 
 (def require-auth
   (interceptor/interceptor
@@ -480,7 +289,7 @@
                (impl-interceptor/terminate
                 (combine context
                          {:response {:status 303
-                                     :headers {"Location" (link/link context ::login
+                                     :headers {"Location" (link/link context :login
                                                                      :params {:return-to (get-in context [:self])})}
                                      :flash {:message "Authentication required"}}}))))}))
 
@@ -554,8 +363,7 @@
    {:enter (fn [context]
              (combine context
                       {:response {:status 200
-                                  :data {:flash (get-in context [:request :flash])
-                                         :self (get-in context [:self])
+                                  :data {:self (get-in context [:self])
                                          :page (get-in context [:page])
                                          :links (cond-> {:self (get-in context [:self])
                                                          :page-stream (link/link context ::page-events :params {:start_from (:id (last (get-in context [:page :items])))})}
@@ -563,91 +371,12 @@
                                                         (merge {:edit-title (link/link context ::edit-title :params {:page-slug (get-in context [:page :page-slug])})
                                                                 :add-item (link/link context ::add-item :params {:page-slug (get-in context [:page :page-slug])})})
                                                         (not (get-in context [:auth]))
-                                                        (merge {:login (link/link context ::login :query-params {:return-to (link/self context)})
-                                                                :signup (link/link context ::signup :query-params {:return-to (link/self context)})}))}}}))}))
+                                                        (merge {:login (link/link context :login :query-params {:return-to (link/self context)})
+                                                                :signup (link/link context :signup :query-params {:return-to (link/self context)})}))}}}))}))
 
-(def with-page-html
-  (interceptor/interceptor
-   {:leave (fn [context]
-             (cond-> context
-                     (edn-wrap/for-html? context)
-                     (->
-                      (assoc-in [:response :headers "Content-Type"] "text/html")
-                      (update-in [:response :body]
-                                 (fn [body]
-                                   (apply str
-                                          (html/emit*
-                                           (html/at application-frame
-                                                    [:#login-box] (login-box-html context)
-                                                    [:#content] (flash-html context)
-
-                                                    #_#_[:#content] (html/html-content
-                                                                 (edn-wrap/html-edn context))
-                                                    #_#_[:#content] (html/append
-                                                                 (map html/html (edn-wrap/forms-edn context)))
-                                                    [:#content] (html/append
-                                                                 (views.pages/page (get-in context [:response :data :page])))
-                                                    [:#content]
-                                                    (if (get-in context [:auth])
-                                                      (let [{:keys [edit-title add-item]} (get-in context [:response :data :links])]
-                                                        (html/append
-                                                         (html/html
-                                                          [:div.panel.panel-default
-                                                           [:div.panel-body
-                                                            [:a {:href edit-title}
-                                                             "Edit the title"]
-                                                            " or "
-                                                            [:a {:href add-item}
-                                                             " add text to this page"]]])))
-                                                      (let [{:keys [login signup]} (get-in context [:response :data :links])]
-                                                        (html/append
-                                                         (html/html
-                                                          [:div.panel.panel-default
-                                                           [:div.panel-body
-                                                            [:a {:href login}
-                                                             "Login"]
-                                                            " or "
-                                                            [:a {:href signup}
-                                                             "Signup"]
-                                                            " to add to this page"]]))))
-
-                                                    [:#content]
-                                                    (html/append
-                                                     (html/html [:script {:type "text/javascript" :src "/js/eventsource.js"}]
-                                                                [:script {:type "text/javascript" :src "/js/gatherlist.js"}]
-                                                                [:script {:type "text/javascript"}
-                                                                 (str "net.thegeez.gatherlist.client.startstream(\"" (get-in context [:response :data :links :page-stream]) "\")")]))))))))))}))
-
-;; dirty hack as Pedestal SSE doesn't do :id field on SSE, so we use
-;; name instead
-(alter-var-root #'io.pedestal.http.sse/EVENT_FIELD (fn [_]
-                                                     (.getBytes "id: " "UTF-8")))
-
-(defn page-stream-ready [event-chan context]
-  (let [start-from (or (try (inc (Long/parseLong (get-in context [:request :headers "last-event-id"])))
-                            (catch Exception e nil))
-                       (try (inc (Long/parseLong (get-in context [:request :query-params :evs_last_event_id])))
-                            (catch Exception e nil))
-                       (try (inc (Long/parseLong (get-in context [:request :query-params :start_from])))
-                            (catch Exception e nil))
-                       0)
-        page-slug (get-in context [:request :path-params :page-slug])]
-    (loop [i 0
-           start-from start-from]
-      (let [items-since (pages/get-items-since context page-slug start-from)
-            start-from (or (when-let [id (:id (last (:items items-since)))]
-                             (inc id))
-                           start-from)]
-        (when items-since
-          (loop [[item & items] (:items items-since)]
-            (when item
-              (when (async/>!! event-chan {:name (:id item)
-                                           :data (pr-str item)})
-                (recur items)))))
-        (Thread/sleep 1000)
-        (when (< i 20)
-          (recur (inc i) start-from)))))
-  (async/close! event-chan))
+(defn page-item-stream [context start-from]
+  (let [page-slug (get-in context [:request :path-params :page-slug])]
+    (pages/get-items-since context page-slug start-from)))
 
 (def create-binding
   {:page
@@ -688,23 +417,24 @@
   routes
   [[["/"
      ^:interceptors [edn-wrap/wrap-edn
-                     with-html
+                     views.application/with-html
                      with-user-auth
                      with-login-data]
      {:get [::home
-            ^:interceptors [with-home-html]
+            ^:interceptors [views.application/with-home-html]
             home]}
      ["/create"
       ^:interceptors [require-auth
                       (binding/with-binding create-binding)]
       {:get [::create create]
        :post [::create-post create-post]}]
-     ["/gle/:page-slug" {:get [::page-events (sse/start-event-stream page-stream-ready)]}]
+     ["/gl/:page-slug/events"
+      {:get [::page-events (w3a-sse/stream-start-from page-item-stream)]}]
      ["/gl/:page-slug"
       ^:interceptors [with-page]
       {:get
        [::page
-        ^:interceptors [with-page-html]
+        ^:interceptors [views.pages/with-page-html]
         page]}
       ["/edit"
        ^:interceptors [require-auth]
@@ -720,21 +450,21 @@
       ^:interceptors [return-if-logged-in]
       ["/github"
        ["/authenticate" {:get [::oauth-github oauth.github/authenticate]}]
-       ["/callback" {:get oauth.github/callback}]]
+       ["/callback" {:get [::oauth-github-callback (oauth.github/callback users/find-or-create-by-github-login)]}]]
 
       ["/google"
        ["/authenticate" {:get [::oauth-google oauth.google/authenticate]}]
-       ["/callback" {:get oauth.google/callback}]]
+       ["/callback" {:get [::oauth-google-callback (oauth.google/callback users/find-or-create-by-google-id)]}]]
 
       ["/facebook"
        ["/authenticate" {:get [::oauth-facebook oauth.facebook/authenticate]}]
-       ["/callback" {:get oauth.facebook/callback}]]
+       ["/callback" {:get [::oauth-facebook-callback (oauth.facebook/callback users/find-or-create-by-facebook-id)]}]]
 
       ["/twitter"
        ["/authenticate" {:get [::oauth-twitter oauth.twitter/authenticate]}]
-       ["/callback" {:get oauth.twitter/callback}]]
+       ["/callback" {:get [::oauth-twitter-callback (oauth.twitter/callback users/find-or-create-by-twitter-id)]}]]
       ["/create-name"
-       ^:interceptors [with-name-html
+       ^:interceptors [views.application/with-name-html
                        (binding/with-binding name-binding)]
        {:get [:oauth-create-name create-name]
         :post create-name-post}]]
@@ -742,17 +472,17 @@
 
      ["/signup"
       ^:interceptors [return-if-logged-in
-                      with-signup-html
+                      views.application/with-signup-html
                       (binding/with-binding signup-binding)]
-      {:get signup
+      {:get [:signup signup]
        :post signup-post}]
      ["/login"
       ^:interceptors [return-if-logged-in
-                      with-login-html
+                      views.application/with-login-html
                       (binding/with-binding login-binding)]
-      {:get login
+      {:get [:login login]
        :post login-post}]
-     ["/logout" {:post logout-post}]]]])
+     ["/logout" {:post [:logout logout-post]}]]]])
 
 (def bootstrap-webjars-resource-path "META-INF/resources/webjars/bootstrap/3.3.4")
 (def jquery-webjars-resource-path "META-INF/resources/webjars/jquery/1.11.1")
