@@ -1,7 +1,10 @@
 (ns net.thegeez.gatherlist.views.pages
   (:require [net.cgrand.enlive-html :as html]
             [clj-time.core :as time]
-            [clj-time.coerce :as time-coerce])
+            [clj-time.coerce :as time-coerce]
+            [net.thegeez.w3a.helpers :as helpers]
+            [net.thegeez.w3a.html :as w3a-html]
+            [net.thegeez.gatherlist.views.application :as views.application])
   (:import [org.joda.time Period]
            [org.joda.time.format PeriodFormatter PeriodFormatterBuilder]))
 
@@ -65,3 +68,43 @@
      (map to-html (:stream (:stream page)))]
     [:div#updates
      {:class "alert alert-info hidden"}]]))
+
+(def with-page-html
+  (helpers/for-html-interceptor
+   (fn [context]
+     (w3a-html/html-string
+      views.application/application-frame
+      [:#login-box] (views.application/login-box-html context)
+
+      [:#content] (html/append
+                   (page (get-in context [:response :data :page])))
+      [:#content]
+      (if (get-in context [:auth])
+        (let [{:keys [edit-title add-item]} (get-in context [:response :data :links])]
+          (html/append
+           (html/html
+            [:div.panel.panel-default
+             [:div.panel-body
+              [:a {:href edit-title}
+               "Edit the title"]
+              " or "
+              [:a {:href add-item}
+               " add text to this page"]]])))
+        (let [{:keys [login signup]} (get-in context [:response :data :links])]
+          (html/append
+           (html/html
+            [:div.panel.panel-default
+             [:div.panel-body
+              [:a {:href login}
+               "Login"]
+              " or "
+              [:a {:href signup}
+               "Signup"]
+              " to add to this page"]]))))
+
+      [:#content]
+      (html/append
+       (html/html [:script {:type "text/javascript" :src "/js/eventsource.js"}]
+                  [:script {:type "text/javascript" :src "/js/gatherlist.js"}]
+                  [:script {:type "text/javascript"}
+                   (str "net.thegeez.gatherlist.client.startstream(\"" (get-in context [:response :data :links :page-stream]) "\")")]))))))
