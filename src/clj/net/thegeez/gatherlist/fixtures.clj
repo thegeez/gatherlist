@@ -10,7 +10,7 @@
     (log/info :msg "Starting fixture loader")
     (when-not (:loaded-fixtures component)
       (try
-        (let [db (:connection database)
+        (let [db (:spec database)
               now (.getTime (java.util.Date.))]
           (jdbc/insert! db :users
                         {:name "amy"

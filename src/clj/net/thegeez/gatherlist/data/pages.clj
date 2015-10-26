@@ -122,10 +122,4 @@
       (let [page-id (:id page)
             items (jdbc/query db ["SELECT items.*, users.name FROM items JOIN users ON created_by = users.id WHERE page_id = ? AND items.id >= ?" page-id start-from])]
         (when (seq items)
-          (let [stream (reduce to-stream {} (map parse-item items))]
-            (-> (select-keys page [:id :created_at :updated_at :name])
-                (assoc
-                    :page-slug (:page_slug page)
-                    :items items
-                    :stream stream
-                    :title (:title stream)))))))))
+          items)))))

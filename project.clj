@@ -15,13 +15,9 @@
                  [org.webjars/bootstrap "3.3.4"]
                  [org.webjars/jquery "1.11.1"]
 
-                 [net.thegeez/w3a "0.0.3"]
+                 [net.thegeez/w3a "0.0.4"]
 
-                 [environ "1.0.1"]
-                 [clj-time "0.11.0"]
-
-                 [clj-http "2.0.0"]
-                 [clj-oauth "1.5.3"]]
+                 [clj-time "0.11.0"]]
 
   :plugins [[lein-cljsbuild "1.1.0"]]
 
