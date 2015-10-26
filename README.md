@@ -1,5 +1,11 @@
 # gatherlist
 
+Web page on top of Pedestal with OAuth and Server-Sent Events
+
+Live demo: https://gatherlist.herokuapp.com/
+
+Blogpost: http://thegeez.net/2015/10/12/gatherlist_pedestal_oauth.html
+
 ## About
 
 Written by:
