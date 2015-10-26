@@ -4,6 +4,7 @@
             [clojure.tools.namespace.repl :as repl]
             [io.pedestal.log :as log]
             [io.pedestal.http :as http]
+            [net.thegeez.w3a.dev-interceptors :as dev-interceptors]
             [net.thegeez.w3a.server :as server]
             [net.thegeez.w3a.system.sql-database :as database]
             [ring.middleware.session.memory]
@@ -16,7 +17,7 @@
 (defn wrap-cljs-interceptor [service]
   (update-in service [::http/interceptors]
              (fn [ics]
-               (into [service/wrap-dev-cljs] ics))))
+               (into [dev-interceptors/wrap-dev-cljs] ics))))
 
 (defn dev-service [service]
     (-> service ;; start with production configuration
@@ -34,7 +35,9 @@
       ;; Wire up interceptor chains
       http/default-interceptors
       http/dev-interceptors
-      wrap-cljs-interceptor))
+      (dev-interceptors/wrap-cljs-interceptor
+       "<script type=\"text/javascript\" src=\"/js/gatherlist.js\"></script>"
+       "<script type=\"text/javascript\" src=\"/js/gatherlist_dev.js\"></script>")))
 
 (defn dev-system [config-options]
   (log/info :msg "Hello world, this is the development system!")
